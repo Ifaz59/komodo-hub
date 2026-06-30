@@ -34,6 +34,11 @@ db.pragma('foreign_keys = ON');
  */
 const pool = {
   query: async (text, params = []) => {
+    // node-postgres (the original production driver) coerces undefined bindings to
+    // NULL, which makes the COALESCE-based partial-update routes work. better-sqlite3
+    // rejects undefined, so we replicate pg's behaviour here. (Defect fix: partial
+    // updates such as PUT /api/auth/profile previously threw a 500.)
+    params = (params || []).map((p) => (p === undefined ? null : p));
     // Convert PostgreSQL $1, $2 style params to SQLite ? style
     let sql = text.replace(/\$(\d+)/g, '?');
 
@@ -47,6 +52,10 @@ const pool = {
 
     // Handle ILIKE (case-insensitive LIKE) - SQLite LIKE is case-insensitive for ASCII
     sql = sql.replace(/ILIKE/gi, 'LIKE');
+
+    // SQLite has no GREATEST(); MAX() is its scalar equivalent.
+    // (Defect fix: DELETE /api/events/:id/register used GREATEST and threw at runtime.)
+    sql = sql.replace(/GREATEST\s*\(/gi, 'MAX(');
 
     // Handle SERIAL PRIMARY KEY -> INTEGER PRIMARY KEY AUTOINCREMENT
     sql = sql.replace(/SERIAL PRIMARY KEY/gi, 'INTEGER PRIMARY KEY AUTOINCREMENT');
